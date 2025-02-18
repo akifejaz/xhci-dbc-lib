@@ -1,0 +1,10 @@
+[Defines]
+  DEC_SPECIFICATION = 0x00010005
+  PACKAGE_NAME      = RuntimeDriverPkg
+  PACKAGE_GUID      = EE452155-1B94-49FC-BDC4-2CBA43F73EE3
+  PACKAGE_VERSION   = 0.10
+
+[Includes]
+  Include
+  RuntimeDriver
+  ../../xhci-dbc-lib
