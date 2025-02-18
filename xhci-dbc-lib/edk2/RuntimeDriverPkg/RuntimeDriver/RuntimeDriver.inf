@@ -1,0 +1,35 @@
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = RuntimeDriver
+  FILE_GUID      = 71532E03-D2DE-4711-8B03-23C6D3D9DD33
+  MODULE_TYPE    = DXE_RUNTIME_DRIVER
+  VERSION_STRING = 1.0
+  ENTRY_POINT    = DriverEntryPoint
+
+[Sources]
+  RuntimeDriver.c
+  ../../../xhci-dbc-lib/io_asm.asm
+  ../../../xhci-dbc-lib/pci.c
+  ../../../xhci-dbc-lib/mmio.c
+  ../../../xhci-dbc-lib/mem.c
+  ../../../xhci-dbc-lib/xhci_dbc.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  RuntimeDriverPkg/RuntimeDriverPkg.dec
+
+[LibraryClasses]
+  IoLib
+  UefiDriverEntryPoint
+  UefiBootServicesTableLib
+  UefiRuntimeLib
+  DebugLib
+  UefiLib
+
+[Protocols]
+
+[Depex]
+  TRUE
+
+[BuildOptions.Common]
+  *_*_*_CC_FLAGS = /GS- /wd4204 /Od /Oi /Oy-
