@@ -11,7 +11,8 @@
 
 #define XHCI_HCCPARAMS1_OFFSET                                  0x10
 
-#define XHCI_DBC_DCERSTSZ_OFFSET                                8
+#define XHCI_DBC_DCDB_OFFSET                                    0x04
+#define XHCI_DBC_DCERSTSZ_OFFSET                                0x08
 #define XHCI_DBC_DCERSTBA_OFFSET                                0x10
 #define XHCI_DBC_DCERDP_OFFSET                                  0x18
 #define XHCI_DBC_DCCP_OFFSET                                    0x30
@@ -57,6 +58,10 @@
 #define DBC_DDI1_VENDOR_ID                                      0x1D6B
 #define DBC_DDI2_PRODUCT_ID                                     0x0010
 #define DBC_DDI2_DEVICE_REVISION                                0
+
+// Door bell Target
+#define DBC_DCDB_OUT_EP		                                    0
+#define DBC_DCDB_IN_EP		                                    1
 
 typedef struct _XHC_INFORMATION
 {
@@ -396,6 +401,25 @@ typedef union _DEBUG_CAPABILITY_PORT_STATUS_AND_CONTROL_REGISTER
 #pragma pack(pop)
 
 #pragma pack(push, 1)
+typedef union _DEBUG_CAPABILITY_DOORBELL_REGISTER
+{
+    struct
+    {
+        uint32_t _reserved_0 : 8; // 7:0
+        uint32_t db_target   : 8; // 15:8
+        uint32_t _reserved_1 : 16;// 31:16
+    } fields;
+    struct
+    {
+        uint32_t _reserved_0              : 8; // 7:0
+        uint32_t doorbell_target          : 1; // 15:8
+        uint32_t _reserved_1              : 16;// 31:16
+    } named_fields;
+    uint32_t value;
+} DCDB;
+#pragma pack(pop)
+
+#pragma pack(push, 1)
 typedef union _DEBUG_CAPABILITY_DEVICE_DESCRIPTOR_INFORMATION_FIELD_1
 {
     struct
@@ -431,6 +455,45 @@ typedef struct _DBC_INFORMATION
     MEM_ALLOC_INFO in_endpoint_context_trb_array;
 } DBC_INFO;
 
+// Global definitions of DbC registers to store values
+DCERSTSZ    dcerstsz;
+DCERSTBA    dcerstba;
+DCERDP      dcerdp;
+DCCP        dccp;
+DCCTRL      dcctrl;
+DCST        dcst;
+DCPORTSC    dcportsc;
+DCDB        dcdb;
+
+bool
+xhci_dbc_send(
+    _In_  XHC_INFO* xhc_info,
+    _In_  void*     data,
+    _In_  int       size,
+    _In_  uint64_t  addr    
+    );
+
+bool
+xhci_dbc_receive(
+    _In_  XHC_INFO* xhc_info,   
+    _In_  int       size,
+    _In_  uint64_t  addr    
+    );
+
+void
+xhci_dbc_ring_doorbell(
+    _In_  XHC_INFO* xhc_info,
+    _In_  uint32_t doorbell
+    );
+
+bool
+xhci_dbc_handshake(
+    _In_  XHC_INFO* xhc_info,    
+    _In_  uint8_t reg_offset,
+    _In_  uint8_t mask_bit,
+    _In_  uint8_t exp_val
+    );
+
 bool
 xhci_dbc_find_xhc(
     _Out_ PCI_ADDRESS* pci_address
@@ -440,6 +503,26 @@ bool
 xhci_dbc_get_xhc_info(
     _In_  PCI_ADDRESS* pci_address,
     _Out_ XHC_INFO*    xhc_info
+    );
+
+void
+xhci_dbc_reset(
+    _In_  XHC_INFO* xhc_info
+    );
+
+bool
+xhci_dbc_enable(
+    _In_  XHC_INFO* xhc_info
+    );
+
+bool
+xhci_dbc_check_enabled(
+    _In_  XHC_INFO* xhc_info
+    );
+
+bool
+xhci_dbc_disable(
+    _In_  XHC_INFO* xhc_info
     );
 
 bool

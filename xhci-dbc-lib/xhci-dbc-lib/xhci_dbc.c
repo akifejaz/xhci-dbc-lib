@@ -1,6 +1,160 @@
 #include "xhci_dbc.h"
 
 bool
+xhci_dbc_send(
+    _In_  XHC_INFO* xhc_info,
+    _In_  void*     data,
+    _In_  int       size,
+    _In_  uint64_t  addr    
+    )
+{
+    // To-Do: Spin Lock should be added so only one hart can send data at one time
+
+    // For data transfer, first check if the size of the data packet doesn’t exceed the max limit.
+    if (size > DBC_ENDPOINT_CONTEXT_DEFAULT_MAX_PACKET_SIZE)
+    {
+        return FALSE;
+    }
+
+    // Check if connection is stable
+    
+    // Get DCCTRL value
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );    
+    
+    // If Debug Device is not in Configured state or device is busy (previous transfer is not completed)
+    if ( (!dcctrl.named_fields.dbc_run) ||
+         (dcctrl.named_fields.halt_out_tr) )
+    {
+        return FALSE;
+    }
+
+    // If we reach this step, we are ready to send data to the remote machine  
+    
+    // Create a new TRB
+
+    // Set BIT(2) of DCCTRL i.e. halt OUT TR
+    
+    // Get DCCTRL value
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );
+    
+    // Update HALT_OUT_TR bit
+    dcctrl.named_fields.halt_out_tr = 1; 
+
+    // Write back to memory
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET ),
+        dcctrl.value
+        );        
+    
+    // Queue it to the existing ones
+
+    // Ring doorbell
+    xhci_dbc_ring_doorbell(xhc_info, DBC_DCDB_OUT_EP);
+}
+
+bool
+xhci_dbc_receive(
+    _In_  XHC_INFO* xhc_info,
+    _In_  int       size,
+    _In_  uint64_t  addr
+    )
+{
+    // To-Do: Spin Lock should be added so only one hart can send data at one time
+
+    // For data transfer, first check if the size of the data packet doesn’t exceed the max limit.
+    if (size > DBC_ENDPOINT_CONTEXT_DEFAULT_MAX_PACKET_SIZE)
+    {
+        return FALSE;
+    }
+
+    // Check if connection is stable
+    
+    // Get DCCTRL value
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );    
+    
+    // If Debug Device is not in Configured state or device is busy (previous transfer is not completed)
+    if ( (!dcctrl.named_fields.dbc_run) ||
+         (dcctrl.named_fields.halt_in_tr) )
+    {
+        return FALSE;
+    }
+
+    // If we reach this step, we are ready to receive data to the remote machine  
+    
+    // Create a new TRB
+
+    // Set BIT(3) of DCCTRL i.e. halt In TR
+    
+    // Get DCCTRL value
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );
+    
+    // Update HALT_IN_TR bit
+    dcctrl.named_fields.halt_in_tr = 1; 
+
+    // Write back to memory
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET ),
+        dcctrl.value
+        );    
+        
+    // Queue it to the existing ones
+
+    // Ring doorbell
+    xhci_dbc_ring_doorbell(xhc_info, DBC_DCDB_IN_EP);
+}
+
+void
+xhci_dbc_ring_doorbell(
+    _In_  XHC_INFO* xhc_info,
+    _In_  uint32_t doorbell
+    )
+{
+    // Read current value from MMIO reg
+    dcdb.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCDB_OFFSET )
+        );
+    
+    // Clear out 15:8 bits
+    dcdb.value &= ~(0xFF << 8);
+    // Update value 
+    dcdb.named_fields.doorbell_target = doorbell;
+    
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCDB_OFFSET ),
+        dcdb.value
+        );    
+}
+
+bool
+xhci_dbc_handshake(
+    _In_  XHC_INFO* xhc_info,     
+    _In_  uint8_t reg_offset,
+    _In_  uint8_t mask_bit,
+    _In_  uint8_t exp_val
+    )
+{
+    uint32_t result;
+
+    while ( TRUE )
+    {
+        result = mmio_read_u32( ( xhc_info->debug_cap_struct_base + reg_offset ) );
+        if ( (result & (1U << mask_bit)) == exp_val )
+            break;
+    }
+
+    return TRUE;
+}
+
+bool
 xhci_dbc_find_xhc(
     _Out_ PCI_ADDRESS* pci_address
     )
@@ -217,9 +371,185 @@ xhci_dbc_get_xhc_info(
     return TRUE;
 }
 
+void
+xhci_dbc_reset(
+    _In_  XHC_INFO* xhc_info
+    )
+{
+    // Reset DbC Port by setting bit 4 of DCPORTSC register
+    // Read current value from MMIO reg
+    dcportsc.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET )
+        );
+    
+    // Update value i.e. reset Port by setting Bit 4
+    dcportsc.named_fields.port_reset = 1;
+
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET ),
+        dcportsc.value
+        );    
+
+    // Bit 4 (Port Reset) is cleared when the bus reset sequence is completed by the 
+    // Debug Host, and the DbC shall transition to the USB default state i.e. setting bit 31 of 
+    // DCCTRL and bit 1 of DCPORTSC. 
+
+    // Wait for Reset Port (Bit 4) to be cleared
+    xhci_dbc_handshake(xhc_info, XHCI_DBC_DCPORTSC_OFFSET, 4, 0);
+
+    // Enable DbC -- reset to USB default state completed
+    xhci_dbc_enable(xhc_info);
+}
+
+bool
+xhci_dbc_enable(
+    _In_  XHC_INFO* xhc_info
+    )
+{
+    /*
+     * Enable DbC by 
+     * 1- Set CTRL_DBC_ENABLE (bit 31) of Debug Capability Control Register (DCCTRL) – Enable DbC
+     * 2- Set CTRL_PORT_ENABLE (bit 1) of Debug Capability Port Status and Control Register (DCPORTSC) - Enable Port
+     */
+
+    // Enable DbC
+    // Read current value from MMIO reg
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );
+    
+    // Update value i.e. enable DbC by setting Bit 31
+    dcctrl.named_fields.debug_capability_enable = 1;
+    
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET ),
+        dcctrl.value
+        );
+
+    // Check if value is being written successfully
+    if (!xhci_dbc_handshake(xhc_info,
+                            XHCI_DBC_DCCTRL_OFFSET, 
+                            31, 
+                            (uint8_t)dcctrl.named_fields.debug_capability_enable))
+    {
+        // Error handling
+        return FALSE;
+    }
+
+    // Enable Port
+    // Read current value from MMIO reg
+    dcportsc.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET )
+        );
+    
+    // Update value i.e. enable Port by setting Bit 1
+    dcportsc.named_fields.port_enabled_disabled = 1;
+    
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET ),
+        dcportsc.value
+        );
+
+    // Check if value is being written successfully
+    if (!xhci_dbc_handshake(xhc_info,
+                            XHCI_DBC_DCPORTSC_OFFSET, 
+                            1, 
+                            (uint8_t)dcportsc.named_fields.port_enabled_disabled))
+    {
+        // Error handling
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+bool
+xhci_dbc_check_enabled(
+    _In_  XHC_INFO* xhc_info
+    )
+{
+    // Check if CTRL_DBC_ENABLE (bit 31) of Debug Capability Control Register (DCCTRL) is set or unset
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );
+
+    if ( dcctrl.named_fields.debug_capability_enable ) 
+        return TRUE;
+    else
+        return FALSE;
+}
+
+bool
+xhci_dbc_disable(
+    _In_  XHC_INFO* xhc_info
+    )
+{
+    /*
+     * Disable DbC first before any config by 
+     * 1- Unset CTRL_PORT_ENABLE (bit 1) of Debug Capability Port Status and Control Register (DCPORTSC) - Enable Port
+     * 2- Unset CTRL_DBC_ENABLE (bit 31) of Debug Capability Control Register (DCCTRL) – Enable DbC
+     */
+
+    // Disable Port
+    // Read current value from MMIO reg
+    dcportsc.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET )
+        );
+    
+    // Update value i.e. disable Port by setting Bit 1
+    dcportsc.named_fields.port_enabled_disabled = 0;
+    
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET ),
+        dcportsc.value
+        );   
+
+    
+    // Check if value is being written successfully
+    if (!xhci_dbc_handshake(xhc_info,
+                            XHCI_DBC_DCPORTSC_OFFSET, 
+                            1, 
+                            (uint8_t)dcportsc.named_fields.port_enabled_disabled))
+    {
+        // Error handling
+        return FALSE;
+    }
+    
+    // Disable DbC
+    // Read current value from MMIO reg
+    dcctrl.value = mmio_read_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
+        );
+    
+    // Update value i.e. disable DbC by unsetting Bit 31
+    dcctrl.named_fields.debug_capability_enable = 0;
+    
+    // Write back updated value to MMIO reg
+    mmio_write_u32(
+        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET ),
+        dcctrl.value
+        );
+
+    // Check if value is being written successfully
+    if (!xhci_dbc_handshake(xhc_info,
+                            XHCI_DBC_DCCTRL_OFFSET, 
+                            31, 
+                            (uint8_t)dcctrl.named_fields.debug_capability_enable))
+    {
+        // Error handling
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
 bool
 xhci_dbc_setup_dbc(
-    _In_  XHC_INFO* xhc_info,
+    _In_  XHC_INFO* xhc_info,   
     _Out_ DBC_INFO* dbc_info
     )
 {
@@ -248,12 +578,11 @@ xhci_dbc_setup_dbc(
     NORMAL_TRB* in_trb_array;
     LINK_TRB*   in_link_trb;
 
-    DCERSTSZ dcerstsz;
-    DCERSTBA dcerstba;
-    DCERDP   dcerdp;
-    DCCP     dccp;
-    DCCTRL   dcctrl;
-    DCST     dcst;
+    // Disable DbC
+    if ( !xhci_dbc_disable(xhc_info) )
+    {
+        return FALSE;
+    }
 
     /*
      * Allocate and initialize all DbC memory data structures
@@ -466,19 +795,13 @@ xhci_dbc_setup_dbc(
         ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCP_OFFSET ),
         dccp.value
         );
+    
 
-    // Set the Debug Capability Enable (DCE) bit to '1' in the Debug Capability Control Register (DCCTRL)
-
-    dcctrl.value = mmio_read_u32(
-        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET )
-        );
-
-    dcctrl.named_fields.debug_capability_enable = 1;
-
-    mmio_write_u32(
-        ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCCTRL_OFFSET ),
-        dcctrl.value
-        );
+    // Enable DbC
+    if ( !xhci_dbc_enable(xhc_info) )
+    {
+        return FALSE;
+    }
 
     // Poll the Event Ring Not Empty bit in the Debug Capability Status Register (DCST)
     //  in order to detect whether or not we may have received a host connection
@@ -490,7 +813,14 @@ xhci_dbc_setup_dbc(
             );
     } while ( dcst.named_fields.event_ring_not_empty == 0 );
 
-    // ... maybe poll DCPORTSC here to check if we actually have a debug host connected? ...
+    // Poll the Current Connect Status Bit of DCPORTSC to check if we actually have a debug host connected
+
+    do
+    {
+        dcportsc.value = mmio_read_u32(
+            ( xhc_info->debug_cap_struct_base + XHCI_DBC_DCPORTSC_OFFSET )
+            );
+    } while ( dcportsc.named_fields.current_connect_status == 0 );
 
     // After the Debug Host connection is detected, software shall wait for the Debug Device to be configured
     //  by the Debug Host. The transition of the DbC Run (DCR) bit to '1' indicates the successful configuration
